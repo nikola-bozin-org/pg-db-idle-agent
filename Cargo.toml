@@ -6,6 +6,7 @@ description = "The PgDbIdleAgent is a customizable, asynchronous agent in Rust t
 license = "MIT"
 keywords = ["agent","runner","worker","postgres","database"]
 repository = "https://github.com/nikola-bozin-org/pg-db-idle-agent"
+readme = "README.md"
 
 [dependencies]
 
