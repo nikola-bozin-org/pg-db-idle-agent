@@ -1,6 +1,6 @@
 [package]
 name = "pg-db-idle-agent"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 description = "The PgDbIdleAgent is a customizable, asynchronous agent in Rust that periodically queries a PostgreSQL database and processes the results using a user-defined function."
 license = "MIT"
