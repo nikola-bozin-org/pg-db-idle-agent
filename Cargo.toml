@@ -1,8 +1,19 @@
 [package]
 name = "pg-db-idle-agent"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "The PgDbIdleAgent is a customizable, asynchronous agent in Rust that periodically queries a PostgreSQL database and processes the results using a user-defined function."
+license = "MIT"
+keywords = ["agent","runner","worker","postgres","database"]
+repository = "https://github.com/nikola-bozin-org/pg-db-idle-agent"
 
 [dependencies]
+
+
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
