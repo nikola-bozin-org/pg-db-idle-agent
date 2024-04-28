@@ -1,0 +1,12 @@
+version: '3.9'
+services:
+  wisdomia-monolithic:
+    container_name: test-pg-container
+    image: postgres
+    restart: "no"
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_DB: test
+      POSTGRES_PASSWORD: test
+    ports:
+      - "5439:5432"  # Remmaped from 5432:5432 to 5439:5432

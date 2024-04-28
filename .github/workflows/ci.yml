@@ -20,6 +20,9 @@ jobs:
         toolchain: stable
         override: true
     
+    - name: Start Services with Docker Compose
+      run: docker-compose up -d
+    
     - name: Build
       run: cargo build --verbose --release
 
