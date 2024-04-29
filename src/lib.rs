@@ -36,7 +36,7 @@ impl PgDbIdleAgent {
 
 #[cfg(test)]
 mod tests {
-    #[derive(FromRow,Debug)]
+    #[derive(FromRow,Debug,PartialEq)]
     struct Example {
         id: i32,
         data: String,
@@ -115,11 +115,16 @@ mod tests {
     
 
     #[tokio::test]
-    async fn test_start() {
+    async fn test_db_setup() {
+        let expected_data = [
+            Example { id: 1, data: "Some random text".to_string(), is_sent: false, version: 0 },
+            Example { id: 2, data: "Another text".to_string(), is_sent: true, version: 1 },
+            Example { id: 3, data: "third text".to_string(), is_sent: true, version: 0 },
+        ];
         let pool = setup_db().await;
         let examples = get_all_examples(&pool).await;
-        examples.into_iter().for_each(|e|{
-            println!("{:?}",e);
+        examples.into_iter().enumerate().for_each(|(index,e)|{
+            assert_eq!(e, expected_data[index], "The fetched data does not match the expected data.");
         })
     }
 }
