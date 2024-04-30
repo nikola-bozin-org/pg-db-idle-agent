@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use sqlx::{pool, PgPool};
+use sqlx::{pool, FromRow, PgPool};
 use tokio::{task::JoinHandle, time};
 
 pub struct PgDbIdleAgent {
@@ -18,31 +18,51 @@ impl PgDbIdleAgent {
         }
     }
 
-    pub async fn start(self) -> JoinHandle<()> {
+    pub async fn start<T>(self)
+     -> JoinHandle<()>
+     where
+     T: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>
+     + Send
+     + Sync
+     + Unpin, 
+    {
         let mut ticker = time::interval(self.interval_secs);
         tokio::task::spawn(async move {
             loop {
                 ticker.tick().await;
-                self.check_data().await;
+                self.check_data::<T>().await;
             }
         })
     }
 
-    async fn check_data(&self) {
+    async fn check_data<T>(&self)
+    where
+        T: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>
+        + Send
+        + Sync
+        + Unpin,
+    {
         println!("Checking data");
-        // let rows = sqlx::query_as(self.query).fetch_all(self.pool).await.unwrap();
+        let rows: Vec<T> = sqlx::query_as::<_, T>(self.query.as_str())
+            .fetch_all(&self.pool)
+            .await
+            .unwrap();
     }
+    
+}
+
+
+#[derive(FromRow,Debug,PartialEq)]
+pub struct Example {
+    id: i32,
+    data: String,
+    is_sent: bool,
+    version: i32,
 }
 
 #[cfg(test)]
 mod tests {
-    #[derive(FromRow,Debug,PartialEq)]
-    struct Example {
-        id: i32,
-        data: String,
-        is_sent: bool,
-        version: i32,
-    }
+
     use super::*;
     use sqlx::{postgres::PgPoolOptions, prelude::FromRow, Pool, Postgres};
 
