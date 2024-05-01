@@ -1,82 +1,83 @@
-use std::time::Duration;
+use std::{fmt::Debug, marker::PhantomData, time::Duration};
 
-use sqlx::{pool, FromRow, PgPool};
+use sqlx::{FromRow, PgPool};
 use tokio::{task::JoinHandle, time};
 
-pub struct PgDbIdleAgent {
+pub struct PgDbIdleAgent<T, F>
+where
+    T: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> + Send + Sync + Unpin + Debug + 'static,
+    F: Fn(&T) + Send + Sync + 'static,
+{
     interval_secs: Duration,
     pool: PgPool,
     query: String,
+    action: F,
+    _marker: PhantomData<T>,
 }
 
-impl PgDbIdleAgent {
-    pub fn new(interval_secs: Duration, pool: PgPool, query: String) -> Self {
+impl<T, F> PgDbIdleAgent<T, F>
+where
+    T: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> + Send + Sync + Unpin + Debug + 'static,
+    F: Fn(&T) + Send + Sync + 'static,
+{
+    pub fn new(interval_secs: Duration, pool: PgPool, query: String, action: F) -> Self {
         Self {
             interval_secs,
             pool,
             query,
+            action,
+            _marker: PhantomData,
         }
     }
 
-    pub async fn start<T>(self)
-     -> JoinHandle<()>
-     where
-     T: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>
-     + Send
-     + Sync
-     + Unpin, 
+    pub async fn start(self) -> JoinHandle<()>
+    where
+        T: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> + Send + Sync + Unpin + Debug,
     {
         let mut ticker = time::interval(self.interval_secs);
         tokio::task::spawn(async move {
             loop {
                 ticker.tick().await;
-                self.check_data::<T>().await;
+                self.check_data().await;
             }
         })
     }
 
-    async fn check_data<T>(&self)
+    async fn check_data(&self)
     where
-        T: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>
-        + Send
-        + Sync
-        + Unpin,
+        T: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> + Send + Sync + Unpin + Debug,
     {
         println!("Checking data");
         let rows: Vec<T> = sqlx::query_as::<_, T>(self.query.as_str())
             .fetch_all(&self.pool)
             .await
             .unwrap();
+        (self.action)(&rows[0]);
     }
-    
 }
 
-
-#[derive(FromRow,Debug,PartialEq)]
+#[derive(FromRow, Debug, PartialEq)]
 pub struct Example {
-    id: i32,
-    data: String,
-    is_sent: bool,
-    version: i32,
+    pub id: i32,
+    pub data: String,
+    pub is_sent: bool,
+    pub version: i32,
 }
 
 #[cfg(test)]
 mod tests {
 
     use super::*;
-    use sqlx::{postgres::PgPoolOptions, prelude::FromRow, Pool, Postgres};
+    use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 
-    async fn drop_examples(pool:&Pool<Postgres>){
-        sqlx::query(
-            "DROP TABLE IF EXISTS example"
-        )
-        .execute(pool)
-        .await
-        .unwrap();
-
+    async fn drop_examples(pool: &Pool<Postgres>) {
+        sqlx::query("DROP TABLE IF EXISTS example")
+            .execute(pool)
+            .await
+            .unwrap();
     }
 
-    async fn create_example_table(pool:&Pool<Postgres>){
+    async fn create_example_table(pool: &Pool<Postgres>) {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS example (
                     id SERIAL PRIMARY KEY,
@@ -90,7 +91,7 @@ mod tests {
         .unwrap();
     }
 
-    async fn insert_example_data(pool: &PgPool){
+    async fn insert_example_data(pool: &PgPool) {
         let data_list = vec![
             ("Some random text".to_string(), false, 0),
             ("Another text".to_string(), true, 1),
@@ -114,7 +115,6 @@ mod tests {
             .await
             .unwrap();
 
-
         drop_examples(&pool).await;
 
         create_example_table(&pool).await;
@@ -124,27 +124,42 @@ mod tests {
         pool
     }
 
-    async fn get_all_examples(pool: &sqlx::PgPool)->Vec<Example> {
-        sqlx::query_as::<_,Example>(
-            "SELECT id, data, is_sent, version FROM example"
-        )
-        .fetch_all(pool)
-        .await
-        .unwrap()
+    async fn get_all_examples(pool: &sqlx::PgPool) -> Vec<Example> {
+        sqlx::query_as::<_, Example>("SELECT id, data, is_sent, version FROM example")
+            .fetch_all(pool)
+            .await
+            .unwrap()
     }
-    
 
     #[tokio::test]
     async fn test_db_setup() {
         let expected_data = [
-            Example { id: 1, data: "Some random text".to_string(), is_sent: false, version: 0 },
-            Example { id: 2, data: "Another text".to_string(), is_sent: true, version: 1 },
-            Example { id: 3, data: "third text".to_string(), is_sent: true, version: 0 },
+            Example {
+                id: 1,
+                data: "Some random text".to_string(),
+                is_sent: false,
+                version: 0,
+            },
+            Example {
+                id: 2,
+                data: "Another text".to_string(),
+                is_sent: true,
+                version: 1,
+            },
+            Example {
+                id: 3,
+                data: "third text".to_string(),
+                is_sent: true,
+                version: 0,
+            },
         ];
         let pool = setup_db().await;
         let examples = get_all_examples(&pool).await;
-        examples.into_iter().enumerate().for_each(|(index,e)|{
-            assert_eq!(e, expected_data[index], "The fetched data does not match the expected data.");
+        examples.into_iter().enumerate().for_each(|(index, e)| {
+            assert_eq!(
+                e, expected_data[index],
+                "The fetched data does not match the expected data."
+            );
         })
     }
 }
