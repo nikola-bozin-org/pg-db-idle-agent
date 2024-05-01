@@ -1,0 +1,16 @@
+[package]
+name = "pg-db-idle-agent-async"
+version = "0.1.0"
+edition = "2021"
+description = "The PgDbIdleAgent is a customizable, asynchronous agent in Rust that periodically queries a PostgreSQL database and processes the results using a user-defined function."
+license = "MIT"
+keywords = ["agent","runner","worker","postgres","database"]
+repository = "https://github.com/nikola-bozin-org/pg-db-idle-agent"
+readme = "README.md"
+
+[dependencies]
+tokio = { version = "1.35.1", features = ["full"] }
+sqlx = { version = "0.7.4", features = ["postgres","runtime-tokio-rustls"] }
+
+[dev-dependencies]
+serial_test = "*"
