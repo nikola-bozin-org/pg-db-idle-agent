@@ -1,4 +1,4 @@
-use std::{fmt::Debug, marker::PhantomData, time::Duration};
+use std::{marker::PhantomData, time::Duration};
 
 use sqlx::{postgres::PgRow, PgPool};
 use tokio::{task::JoinHandle, time};
@@ -14,7 +14,6 @@ where
     T: for<'r> sqlx::FromRow<'r, PgRow> + Send + Sync + Unpin + 'static,
     F: Fn(&T) + Send + Sync + 'static,
     E: Fn(sqlx::Error) + Send + Sync + 'static, // Error handling callback
-
 {
     interval_secs: Duration,
     pool: PgPool,
@@ -30,10 +29,14 @@ where
 
     F: Fn(&T) + Send + Sync + 'static,
     E: Fn(sqlx::Error) + Send + Sync + 'static, // Error handling callback
-    
-
-    {
-    pub fn new(interval_secs: Duration, pool: PgPool, query: String, action: F,error_handler:E) -> Self {
+{
+    pub fn new(
+        interval_secs: Duration,
+        pool: PgPool,
+        query: String,
+        action: F,
+        error_handler: E,
+    ) -> Self {
         Self {
             interval_secs,
             pool,
@@ -56,9 +59,9 @@ where
         })
     }
 
-    async fn check_data(&self) -> Result<(),sqlx::Error>
+    async fn check_data(&self) -> Result<(), sqlx::Error>
     where
-        T: for<'r> sqlx::FromRow<'r, PgRow> + Send + Sync + Unpin ,
+        T: for<'r> sqlx::FromRow<'r, PgRow> + Send + Sync + Unpin,
     {
         let rows: Vec<T> = sqlx::query_as::<_, T>(self.query.as_str())
             .fetch_all(&self.pool)
@@ -73,7 +76,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::{postgres::PgPoolOptions, Pool, Postgres, FromRow};
+    use serial_test::serial;
+    use sqlx::{postgres::PgPoolOptions, FromRow, Pool, Postgres};
 
     #[derive(FromRow, Debug, PartialEq)]
     pub struct Example {
@@ -84,7 +88,22 @@ mod tests {
     }
 
     async fn drop_examples(pool: &Pool<Postgres>) {
-        sqlx::query("DROP TABLE IF EXISTS example")
+        // IMPORTANT:
+
+        // in example TABLE we have:
+        // SERIAL PRIMARY id
+        // this internally creates example_id_seq SEQUENCE to generate unique values for id
+        // for that reason we have to DROP sequence too when we drop example TABLE.
+        // CASCADE removes all dependent objects are dropped alog with the table.
+
+        sqlx::query("DROP TABLE IF EXISTS example CASCADE")
+            .execute(pool)
+            .await
+            .unwrap();
+
+        // This is sort of redundant but let it be here.
+
+        sqlx::query("DROP SEQUENCE IF EXISTS example_id_seq CASCADE")
             .execute(pool)
             .await
             .unwrap();
@@ -149,6 +168,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_db_setup() {
         let expected_data = [
             Example {
@@ -179,4 +199,53 @@ mod tests {
             );
         })
     }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_pg_db_idle_agent() {
+        let pool = setup_db().await;
+
+        let action = |example: &Example| {
+            println!("Processing example {:?}", example);
+        };
+
+        let error_handler = |err: sqlx::Error| {
+            eprintln!("Error while processing examples: {:?}", err);
+        };
+
+        let interval_secs = Duration::from_secs(1);
+        let query = "SELECT id, data, is_sent, version FROM example".to_string();
+        let agent = PgDbIdleAgent::new(interval_secs, pool.clone(), query, action, error_handler);
+
+        let handle = agent.start().await;
+
+        tokio::time::sleep(Duration::from_secs(4)).await;
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_pg_db_idle_agent_error() {
+        let pool = setup_db().await;
+
+        let action = |example: &Example| {
+            println!("Processing example {:?}", example);
+        };
+
+        let error_handler = |err: sqlx::Error| {
+            eprintln!("Error while processing examples: {:?}", err);
+        };
+
+        let interval_secs = Duration::from_secs(1);
+        let query = "INVALID SQL".to_string();
+        let agent = PgDbIdleAgent::new(interval_secs, pool.clone(), query, action, error_handler);
+
+        let handle = agent.start().await;
+
+        tokio::time::sleep(Duration::from_secs(4)).await;
+
+        handle.abort();
+    }
+    
 }
