@@ -28,3 +28,9 @@ jobs:
 
     - name: Run tests
       run: cargo test --verbose -- --nocapture
+
+    - name: Run example
+      run: 
+        |
+        cd example
+        cargo run

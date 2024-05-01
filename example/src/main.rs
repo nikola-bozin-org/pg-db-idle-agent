@@ -92,7 +92,7 @@ async fn main() {
     };
 
     let log_error = |err: sqlx::Error| {
-        dbg!("ERRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRROR");
+        dbg!("Error happend...");
         dbg!(err);
     };
     let pool = setup_db().await;
@@ -104,5 +104,8 @@ async fn main() {
         log_error,
     );
     let handle = idle_agent.start().await;
-    handle.await.unwrap()
+    
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    handle.abort();
 }
