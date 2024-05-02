@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use pg_db_idle_agent_async::PgDbIdleAgent;
+use pg_db_idle_agent_async::{PgDbAgentParams, PgDbAgentQueryActionParams, PgDbIdleAgent};
 use sqlx::prelude::FromRow;
 use sqlx::PgPool;
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
@@ -87,24 +87,27 @@ async fn setup_db() -> Pool<Postgres> {
 
 #[tokio::main]
 async fn main() {
-    let log = |ex: &Example| {
+    let action = |ex: &Example| {
         dbg!(ex.id);
     };
 
-    let log_error = |err: sqlx::Error| {
+    let error_handler = |err: sqlx::Error| {
         dbg!("Error happend...");
         dbg!(err);
     };
     let pool = setup_db().await;
-    let idle_agent = PgDbIdleAgent::new(
+    let query = String::from("SELECT id, data, is_sent, version FROM example");
+
+    let params = PgDbAgentParams::new(
+        vec![PgDbAgentQueryActionParams::new(pool, query, action)],
         Duration::from_secs(1),
-        pool,
-        "SELECT id, data, is_sent, version FROM example".to_string(),
-        log,
-        log_error,
+        error_handler,
     );
-    let handle = idle_agent.start().await;
-    
+
+    let agent = PgDbIdleAgent::new(params);
+
+    let handle = agent.start().await;
+
     tokio::time::sleep(Duration::from_secs(5)).await;
 
     handle.abort();

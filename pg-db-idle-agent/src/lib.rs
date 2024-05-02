@@ -1,6 +1,7 @@
-use std::{marker::PhantomData, time::Duration};
+mod pg_db_agent_params;
 
-use sqlx::{postgres::PgRow, PgPool};
+pub use pg_db_agent_params::*;
+use sqlx::postgres::PgRow;
 use tokio::{task::JoinHandle, time};
 
 /// Quick reminders:
@@ -15,12 +16,7 @@ where
     F: Fn(&T) + Send + Sync + 'static,
     E: Fn(sqlx::Error) + Send + Sync + 'static, // Error handling callback
 {
-    interval_secs: Duration,
-    pool: PgPool,
-    query: String,
-    action: F,
-    error_handler: E,
-    _marker: PhantomData<T>, // Add this so compile does not complain about unused parameter T.
+    params: PgDbAgentParams<T,F,E>
 }
 
 impl<T, F, E> PgDbIdleAgent<T, F, E>
@@ -31,29 +27,20 @@ where
     E: Fn(sqlx::Error) + Send + Sync + 'static, // Error handling callback
 {
     pub fn new(
-        interval_secs: Duration,
-        pool: PgPool,
-        query: String,
-        action: F,
-        error_handler: E,
+        params: PgDbAgentParams<T, F, E>,
     ) -> Self {
         Self {
-            interval_secs,
-            pool,
-            query,
-            action,
-            error_handler,
-            _marker: PhantomData, // This is hwo to initialize phantom data.
+            params,
         }
     }
 
     pub async fn start(self) -> JoinHandle<()> {
-        let mut ticker = time::interval(self.interval_secs);
+        let mut ticker = time::interval(self.params.interval_secs);
         tokio::task::spawn(async move {
             loop {
                 ticker.tick().await;
                 if let Err(e) = self.check_data().await {
-                    (self.error_handler)(e);
+                    (self.params.error_handler)(e);
                 }
             }
         })
@@ -63,21 +50,26 @@ where
     where
         T: for<'r> sqlx::FromRow<'r, PgRow> + Send + Sync + Unpin,
     {
-        let rows: Vec<T> = sqlx::query_as::<_, T>(self.query.as_str())
-            .fetch_all(&self.pool)
-            .await?;
-        rows.into_iter().for_each(|element| {
-            (self.action)(&element); // This is how to invoke an action thats a property.
-        });
+        for param in &self.params.query_actions {
+            dbg!(format!("Processing: {}",param.query));
+            let rows: Vec<T> = sqlx::query_as::<_, T>(param.query.as_str())
+                .fetch_all(&param.pool)
+                .await?;
+            for element in rows {
+                (param.action)(&element); // This is how to invoke an action that's a property.
+            }
+        }
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use serial_test::serial;
-    use sqlx::{postgres::PgPoolOptions, FromRow, Pool, Postgres};
+    use sqlx::{postgres::PgPoolOptions, FromRow, PgPool, Pool, Postgres};
 
     #[derive(FromRow, Debug, PartialEq)]
     pub struct Example {
@@ -215,7 +207,15 @@ mod tests {
 
         let interval_secs = Duration::from_secs(1);
         let query = "SELECT id, data, is_sent, version FROM example".to_string();
-        let agent = PgDbIdleAgent::new(interval_secs, pool.clone(), query, action, error_handler);
+
+
+        let params = PgDbAgentParams::new(
+            vec![PgDbAgentQueryActionParams::new(pool, query, action)],
+            interval_secs,
+            error_handler,
+        );
+    
+        let agent = PgDbIdleAgent::new(params);
 
         let handle = agent.start().await;
 
@@ -239,7 +239,14 @@ mod tests {
 
         let interval_secs = Duration::from_secs(1);
         let query = "INVALID SQL".to_string();
-        let agent = PgDbIdleAgent::new(interval_secs, pool.clone(), query, action, error_handler);
+
+        let params = PgDbAgentParams::new(
+            vec![PgDbAgentQueryActionParams::new(pool, query, action)],
+            interval_secs,
+            error_handler,
+        );
+    
+        let agent = PgDbIdleAgent::new(params);
 
         let handle = agent.start().await;
 
@@ -247,5 +254,4 @@ mod tests {
 
         handle.abort();
     }
-    
 }
